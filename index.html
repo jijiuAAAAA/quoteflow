@@ -13,6 +13,7 @@
     .g{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media (max-width:700px){.g{grid-template-columns:1fr}}
     .actions{display:flex;gap:10px;flex-wrap:wrap}.btn{border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}.main{background:var(--brand);color:#0a1020}.sub{background:#2a3f65;color:#e5ecff}
     pre{white-space:pre-wrap;background:#0a1224;border:1px solid #344a72;border-radius:10px;padding:10px;line-height:1.6}
+    .metrics{font-size:13px;line-height:1.7}
   </style>
 </head>
 <body><div class="wrap">
@@ -46,13 +47,81 @@
     <h3>强硬催款文案</h3>
     <pre id="hard">等待生成...</pre>
   </div>
+
+  <details class="card">
+    <summary>最小数据面板（本地）</summary>
+    <div class="metrics" id="metricsBox">加载中...</div>
+    <div class="actions" style="margin-top:8px">
+      <button id="exportMetrics" class="btn sub">导出统计JSON</button>
+      <button id="resetMetrics" class="btn sub">重置统计</button>
+    </div>
+    <div class="muted">说明：数据仅保存在当前浏览器 localStorage，不上传服务器。</div>
+  </details>
 </div>
 <script>
 let Q='',S='',H='';
+const METRICS_KEY = 'quoteflow.metrics.v1';
+
 function v(id){return document.getElementById(id).value.trim()}
 function must(){return ['client','project','amount','due'].every(id=>v(id))}
+function uuid(){return crypto?.randomUUID ? crypto.randomUUID() : ('sid-' + Date.now() + '-' + Math.random().toString(16).slice(2));}
+
+function getMetrics(){
+  const raw = localStorage.getItem(METRICS_KEY);
+  if(raw){
+    try { return JSON.parse(raw); } catch(e) {}
+  }
+  return {
+    session_id: uuid(),
+    created_at: Date.now(),
+    events: [],
+    counters: {
+      page_view: 0,
+      generate_click: 0,
+      generate_success: 0,
+      generate_fail: 0,
+      copy_click: 0,
+      copy_success: 0,
+      copy_fail: 0
+    }
+  };
+}
+
+function saveMetrics(m){ localStorage.setItem(METRICS_KEY, JSON.stringify(m)); }
+
+function track(event, extra={}){
+  const m = getMetrics();
+  if (typeof m.counters[event] === 'number') m.counters[event] += 1;
+  m.events.push({
+    ts: Date.now(),
+    event,
+    ...extra
+  });
+  if (m.events.length > 300) m.events = m.events.slice(-300);
+  saveMetrics(m);
+  renderMetrics();
+}
+
+function renderMetrics(){
+  const m = getMetrics();
+  const c = m.counters;
+  const genRate = c.page_view ? ((c.generate_success / c.page_view) * 100).toFixed(1) : '0.0';
+  const copyRate = c.generate_success ? ((c.copy_success / c.generate_success) * 100).toFixed(1) : '0.0';
+  const failRate = (c.generate_success + c.generate_fail) ? ((c.generate_fail / (c.generate_success + c.generate_fail)) * 100).toFixed(1) : '0.0';
+
+  document.getElementById('metricsBox').innerHTML = `
+PV(页面打开): ${c.page_view}<br>
+生成点击: ${c.generate_click} ｜ 生成成功: ${c.generate_success} ｜ 生成失败: ${c.generate_fail}<br>
+复制点击: ${c.copy_click} ｜ 复制成功: ${c.copy_success} ｜ 复制失败: ${c.copy_fail}<br>
+生成率: ${genRate}% ｜ 复制率: ${copyRate}% ｜ 生成失败率: ${failRate}%`;
+}
+
 function gen(){
-  if(!must()) return alert('请先填完整：客户名/项目名/金额/截止日期');
+  track('generate_click');
+  if(!must()){
+    track('generate_fail', {reason:'missing_fields'});
+    return alert('请先填完整：客户名/项目名/金额/截止日期');
+  }
   const c=v('client'),p=v('project'),a=v('amount'),d=v('due');
   Q=`【报价单】\n客户：${c}\n项目：${p}\n金额：¥${a}\n交付/付款截止：${d}\n\n如确认，请回复“同意”，我将按此排期执行。`;
   S=`Hi ${c}，关于「${p}」这单，金额 ¥${a}，约定截止是 ${d}。\n这边温馨提醒下，如已安排付款烦请回个消息，我好同步排期🙏`;
@@ -60,12 +129,49 @@ function gen(){
   document.getElementById('quote').textContent=Q;
   document.getElementById('soft').textContent=S;
   document.getElementById('hard').textContent=H;
+  track('generate_success');
 }
-async function copy(t){if(!t)return alert('先生成内容');await navigator.clipboard.writeText(t);alert('已复制')}
+
+async function copy(t, type){
+  track('copy_click', {type});
+  if(!t){
+    track('copy_fail', {type, reason:'empty'});
+    return alert('先生成内容');
+  }
+  try{
+    await navigator.clipboard.writeText(t);
+    track('copy_success', {type});
+    alert('已复制');
+  }catch(e){
+    track('copy_fail', {type, reason:'clipboard_error'});
+    alert('复制失败，请手动长按文本复制');
+  }
+}
+
+function exportMetrics(){
+  const m = getMetrics();
+  const blob = new Blob([JSON.stringify(m, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `quoteflow-metrics-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function resetMetrics(){
+  localStorage.removeItem(METRICS_KEY);
+  renderMetrics();
+  alert('统计已重置');
+}
 
 document.getElementById('gen').onclick=gen;
-document.getElementById('copyQuote').onclick=()=>copy(Q);
-document.getElementById('copySoft').onclick=()=>copy(S);
-document.getElementById('copyHard').onclick=()=>copy(H);
+document.getElementById('copyQuote').onclick=()=>copy(Q,'quote');
+document.getElementById('copySoft').onclick=()=>copy(S,'soft');
+document.getElementById('copyHard').onclick=()=>copy(H,'hard');
+document.getElementById('exportMetrics').onclick=exportMetrics;
+document.getElementById('resetMetrics').onclick=resetMetrics;
+
+track('page_view');
+renderMetrics();
 </script>
 </body></html>
