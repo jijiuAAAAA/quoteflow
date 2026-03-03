@@ -25,9 +25,9 @@
 </head>
 <body><div class="wrap">
   <div class="card">
-    <h1>QuoteFlow</h1>
-    <div>给独立开发者/自由职业者：60秒生成可直接发送的报价与催款文案。</div>
-    <div class="muted">主路径：填写信息 → 立即生成 → 复制发送（无需注册）</div>
+    <h1 id="heroTitle">QuoteFlow</h1>
+    <div id="heroDesc">给独立开发者/自由职业者：60秒生成可直接发送的报价与催款文案。</div>
+    <div class="muted" id="heroSub">主路径：填写信息 → 立即生成 → 复制发送（无需注册）</div>
     <div class="chips" id="sceneChips"></div>
   </div>
 
@@ -61,6 +61,14 @@
   </div>
 
   <details class="card">
+    <summary>历史记录（本地）</summary>
+    <div class="metrics" id="historyBox">暂无历史记录。</div>
+    <div class="actions" style="margin-top:8px">
+      <button id="clearHistory" class="btn sub">清空历史</button>
+    </div>
+  </details>
+
+  <details class="card">
     <summary>最小数据面板（本地）</summary>
     <div class="metrics" id="metricsBox">加载中...</div>
     <div class="actions" style="margin-top:8px">
@@ -74,11 +82,60 @@
 let Q='',S='',H='';
 const METRICS_KEY='quoteflow.metrics.v1';
 const FORM_KEY='quoteflow.form.v1';
+const HISTORY_KEY='quoteflow.history.v1';
 const scenes=[
   {label:'网站开发',project:'企业官网开发（含部署）',amount:'6800'},
   {label:'小程序开发',project:'预约小程序开发',amount:'12000'},
   {label:'自动化脚本',project:'数据抓取与自动报表脚本',amount:'4500'}
 ];
+
+function applyABVariant(){
+  const variant=(new URLSearchParams(location.search).get('ab')||'A').toUpperCase();
+  const title=document.getElementById('heroTitle');
+  const desc=document.getElementById('heroDesc');
+  const sub=document.getElementById('heroSub');
+  if(variant==='B'){
+    title.textContent='QuoteFlow｜别再为催款尴尬';
+    desc.textContent='面向独立开发者：输入项目信息，1分钟生成专业报价和催款文案。';
+    sub.textContent='主路径：填写信息 → 一键生成 → 直接发送（无需注册）';
+  }
+}
+
+function getHistory(){
+  const raw=localStorage.getItem(HISTORY_KEY);
+  if(!raw) return [];
+  try{return JSON.parse(raw)}catch{return []}
+}
+function saveHistory(list){localStorage.setItem(HISTORY_KEY,JSON.stringify(list.slice(0,30)))}
+function addHistory(item){
+  const list=getHistory();
+  list.unshift(item);
+  saveHistory(list);
+  renderHistory();
+}
+function renderHistory(){
+  const box=document.getElementById('historyBox');
+  const list=getHistory();
+  if(!list.length){box.textContent='暂无历史记录。';return;}
+  box.innerHTML=list.slice(0,8).map((x,i)=>`<div style="margin:8px 0;padding:8px;border:1px solid #304262;border-radius:8px;">
+  <div><b>${new Date(x.ts).toLocaleString()}</b> · ${x.project} · ¥${x.amount}</div>
+  <div style="margin-top:4px;">${x.quote.slice(0,80)}...</div>
+  <div style="margin-top:6px;"><button class="btn sub" onclick="reuseHistory(${i})">复用</button></div>
+  </div>`).join('');
+}
+function reuseHistory(i){
+  const x=getHistory()[i]; if(!x) return;
+  document.getElementById('client').value=x.client;
+  document.getElementById('project').value=x.project;
+  document.getElementById('amount').value=x.amount;
+  document.getElementById('due').value=x.due;
+  document.getElementById('tone').value=x.tone||'professional';
+  Q=x.quote;S=x.soft;H=x.hard;
+  document.getElementById('quote').textContent=Q;
+  document.getElementById('soft').textContent=S;
+  document.getElementById('hard').textContent=H;
+  setStatus('已复用历史记录，可直接复制发送。','ok');
+}
 
 function v(id){return document.getElementById(id).value.trim()}
 function setStatus(text,cls=''){const el=document.getElementById('status');el.className='status '+cls;el.textContent=text;}
@@ -112,12 +169,14 @@ function gen(){
   track('generate_click');
   saveForm();
   if(!must()){track('generate_fail',{reason:'missing_fields'});setStatus('请先填完整：客户名 / 项目名 / 金额 / 截止日期','warn');return;}
+  const c=v('client'),p=v('project'),a=v('amount'),d=v('due'),tone=v('tone');
   const btn=document.getElementById('gen');btn.disabled=true;btn.textContent='生成中...';
   setTimeout(()=>{
     buildTexts();
     document.getElementById('quote').textContent=Q;
     document.getElementById('soft').textContent=S;
     document.getElementById('hard').textContent=H;
+    addHistory({ts:Date.now(),client:c,project:p,amount:a,due:d,tone:tone,quote:Q,soft:S,hard:H});
     track('generate_success');
     setStatus('已生成，可直接复制发送。','ok');
     btn.disabled=false;btn.textContent='立即生成可发送文案';
@@ -139,11 +198,14 @@ document.getElementById('copySoft').onclick=()=>copy(S,'soft');
 document.getElementById('copyHard').onclick=()=>copy(H,'hard');
 document.getElementById('exportMetrics').onclick=exportMetrics;
 document.getElementById('resetMetrics').onclick=resetMetrics;
+document.getElementById('clearHistory').onclick=()=>{localStorage.removeItem(HISTORY_KEY);renderHistory();setStatus('历史记录已清空。');};
 ['client','project','amount','due','tone'].forEach(id=>document.getElementById(id).addEventListener('input',saveForm));
 
+applyABVariant();
 restoreForm();
 initScenes();
 track('page_view');
 renderMetrics();
+renderHistory();
 </script>
 </body></html>
