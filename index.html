@@ -73,6 +73,7 @@
     <div class="metrics" id="metricsBox">加载中...</div>
     <div class="actions" style="margin-top:8px">
       <button id="exportMetrics" class="btn sub">导出统计JSON</button>
+      <button id="abDecision" class="btn sub">给出A/B建议</button>
       <button id="resetMetrics" class="btn sub">重置统计</button>
     </div>
     <div class="muted">数据仅保存在当前浏览器 localStorage，不上传服务器。</div>
@@ -80,9 +81,10 @@
 </div>
 <script>
 let Q='',S='',H='';
-const METRICS_KEY='quoteflow.metrics.v1';
+const METRICS_KEY='quoteflow.metrics.v2';
 const FORM_KEY='quoteflow.form.v1';
 const HISTORY_KEY='quoteflow.history.v1';
+let AB_VARIANT='A';
 const scenes=[
   {label:'网站开发',project:'企业官网开发（含部署）',amount:'6800'},
   {label:'小程序开发',project:'预约小程序开发',amount:'12000'},
@@ -91,10 +93,11 @@ const scenes=[
 
 function applyABVariant(){
   const variant=(new URLSearchParams(location.search).get('ab')||'A').toUpperCase();
+  AB_VARIANT = variant==='B' ? 'B' : 'A';
   const title=document.getElementById('heroTitle');
   const desc=document.getElementById('heroDesc');
   const sub=document.getElementById('heroSub');
-  if(variant==='B'){
+  if(AB_VARIANT==='B'){
     title.textContent='QuoteFlow｜别再为催款尴尬';
     desc.textContent='面向独立开发者：输入项目信息，1分钟生成专业报价和催款文案。';
     sub.textContent='主路径：填写信息 → 一键生成 → 直接发送（无需注册）';
@@ -142,16 +145,33 @@ function setStatus(text,cls=''){const el=document.getElementById('status');el.cl
 function must(){return ['client','project','amount','due'].every(id=>v(id))}
 function uuid(){return crypto?.randomUUID ? crypto.randomUUID() : ('sid-'+Date.now()+'-'+Math.random().toString(16).slice(2));}
 
+function blankCounters(){return {page_view:0,generate_click:0,generate_success:0,generate_fail:0,copy_click:0,copy_success:0,copy_fail:0}}
 function getMetrics(){const raw=localStorage.getItem(METRICS_KEY);if(raw){try{return JSON.parse(raw)}catch{}}
-  return {session_id:uuid(),created_at:Date.now(),events:[],counters:{page_view:0,generate_click:0,generate_success:0,generate_fail:0,copy_click:0,copy_success:0,copy_fail:0}}}
+  return {session_id:uuid(),created_at:Date.now(),events:[],counters:blankCounters(),variants:{A:blankCounters(),B:blankCounters()}}}
 function saveMetrics(m){localStorage.setItem(METRICS_KEY,JSON.stringify(m))}
-function track(event,extra={}){const m=getMetrics();if(typeof m.counters[event]==='number')m.counters[event]+=1;m.events.push({ts:Date.now(),event,...extra});if(m.events.length>300)m.events=m.events.slice(-300);saveMetrics(m);renderMetrics();}
+function track(event,extra={}){
+  const m=getMetrics();
+  if(typeof m.counters[event]==='number') m.counters[event]+=1;
+  if(!m.variants) m.variants={A:blankCounters(),B:blankCounters()};
+  if(!m.variants[AB_VARIANT]) m.variants[AB_VARIANT]=blankCounters();
+  if(typeof m.variants[AB_VARIANT][event]==='number') m.variants[AB_VARIANT][event]+=1;
+  m.events.push({ts:Date.now(),event,ab:AB_VARIANT,...extra});
+  if(m.events.length>500) m.events=m.events.slice(-500);
+  saveMetrics(m);renderMetrics();
+}
 
-function renderMetrics(){const c=getMetrics().counters;
+function metricLine(c){
   const genRate=c.page_view?((c.generate_success/c.page_view)*100).toFixed(1):'0.0';
   const copyRate=c.generate_success?((c.copy_success/c.generate_success)*100).toFixed(1):'0.0';
+  return `PV ${c.page_view}｜生成成功 ${c.generate_success}｜复制成功 ${c.copy_success}｜生成率 ${genRate}%｜复制率 ${copyRate}%`;
+}
+function renderMetrics(){
+  const m=getMetrics();
+  const c=m.counters;
+  const a=(m.variants&&m.variants.A)||blankCounters();
+  const b=(m.variants&&m.variants.B)||blankCounters();
   const failRate=(c.generate_success+c.generate_fail)?((c.generate_fail/(c.generate_success+c.generate_fail))*100).toFixed(1):'0.0';
-  document.getElementById('metricsBox').innerHTML=`PV: ${c.page_view}<br>生成点击: ${c.generate_click} ｜ 生成成功: ${c.generate_success} ｜ 生成失败: ${c.generate_fail}<br>复制点击: ${c.copy_click} ｜ 复制成功: ${c.copy_success} ｜ 复制失败: ${c.copy_fail}<br>生成率: ${genRate}% ｜ 复制率: ${copyRate}% ｜ 生成失败率: ${failRate}%`;
+  document.getElementById('metricsBox').innerHTML=`当前AB版本：${AB_VARIANT}<br>总览：${metricLine(c)}｜失败率 ${failRate}%<br>A版：${metricLine(a)}<br>B版：${metricLine(b)}`;
 }
 
 function saveForm(){localStorage.setItem(FORM_KEY,JSON.stringify({client:v('client'),project:v('project'),amount:v('amount'),due:v('due'),tone:v('tone')}));}
@@ -188,6 +208,19 @@ async function copy(t,type){track('copy_click',{type});if(!t){track('copy_fail',
   catch{track('copy_fail',{type,reason:'clipboard_error'});setStatus('复制失败，请手动长按文本复制。','warn');}}
 
 function exportMetrics(){const m=getMetrics();const blob=new Blob([JSON.stringify(m,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`quoteflow-metrics-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;a.click();URL.revokeObjectURL(a.href);}
+function decideAB(){
+  const m=getMetrics();
+  const a=(m.variants&&m.variants.A)||blankCounters();
+  const b=(m.variants&&m.variants.B)||blankCounters();
+  const ar=a.generate_success? a.copy_success/a.generate_success : 0;
+  const br=b.generate_success? b.copy_success/b.generate_success : 0;
+  if(a.generate_success<5 || b.generate_success<5){
+    setStatus('样本不足：建议A/B各至少5次生成成功后再决策。','warn');
+    return;
+  }
+  const winner = ar>=br ? 'A' : 'B';
+  setStatus(`当前建议保留 ${winner} 版（以复制率为主指标）。`,`ok`);
+}
 function resetMetrics(){localStorage.removeItem(METRICS_KEY);renderMetrics();setStatus('统计已重置。');}
 
 function initScenes(){const box=document.getElementById('sceneChips');scenes.forEach(s=>{const c=document.createElement('span');c.className='chip';c.textContent=s.label;c.onclick=()=>{document.getElementById('project').value=s.project;document.getElementById('amount').value=s.amount;setStatus('已填入场景模板，请补充客户名和截止日期。');saveForm();};box.appendChild(c);});}
@@ -197,6 +230,7 @@ document.getElementById('copyQuote').onclick=()=>copy(Q,'quote');
 document.getElementById('copySoft').onclick=()=>copy(S,'soft');
 document.getElementById('copyHard').onclick=()=>copy(H,'hard');
 document.getElementById('exportMetrics').onclick=exportMetrics;
+document.getElementById('abDecision').onclick=decideAB;
 document.getElementById('resetMetrics').onclick=resetMetrics;
 document.getElementById('clearHistory').onclick=()=>{localStorage.removeItem(HISTORY_KEY);renderHistory();setStatus('历史记录已清空。');};
 ['client','project','amount','due','tone'].forEach(id=>document.getElementById(id).addEventListener('input',saveForm));
