@@ -26,8 +26,8 @@
 <body><div class="wrap">
   <div class="card">
     <h1>QuoteFlow</h1>
-    <div>60秒生成可直接发送的报价单和催款文案。</div>
-    <div class="muted">主路径：填写信息 → 生成文案 → 复制发送</div>
+    <div>给独立开发者/自由职业者：60秒生成可直接发送的报价与催款文案。</div>
+    <div class="muted">主路径：填写信息 → 立即生成 → 复制发送（无需注册）</div>
     <div class="chips" id="sceneChips"></div>
   </div>
 
@@ -44,7 +44,7 @@
     <div class="status" id="status">请填写信息后点击“生成文案”。</div>
     <br/>
     <div class="actions">
-      <button id="gen" class="btn main">生成文案</button>
+      <button id="gen" class="btn main">立即生成可发送文案</button>
       <button id="copyQuote" class="btn sub">复制报价单</button>
       <button id="copySoft" class="btn sub">复制温和催款</button>
       <button id="copyHard" class="btn sub">复制强硬催款</button>
@@ -75,9 +75,9 @@ let Q='',S='',H='';
 const METRICS_KEY='quoteflow.metrics.v1';
 const FORM_KEY='quoteflow.form.v1';
 const scenes=[
-  {label:'设计服务',project:'品牌海报设计',amount:'1200'},
-  {label:'短视频剪辑',project:'短视频剪辑包月',amount:'3000'},
-  {label:'代运营',project:'小红书账号代运营',amount:'4800'}
+  {label:'网站开发',project:'企业官网开发（含部署）',amount:'6800'},
+  {label:'小程序开发',project:'预约小程序开发',amount:'12000'},
+  {label:'自动化脚本',project:'数据抓取与自动报表脚本',amount:'4500'}
 ];
 
 function v(id){return document.getElementById(id).value.trim()}
@@ -120,7 +120,7 @@ function gen(){
     document.getElementById('hard').textContent=H;
     track('generate_success');
     setStatus('已生成，可直接复制发送。','ok');
-    btn.disabled=false;btn.textContent='生成文案';
+    btn.disabled=false;btn.textContent='立即生成可发送文案';
   },220);
 }
 
