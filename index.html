@@ -5,14 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>QuoteFlow｜报价单与催款助手</title>
   <style>
-    :root{--bg:#0b1020;--card:#121a33;--line:#33476d;--txt:#e9efff;--muted:#9fb0d6;--brand:#7b8cff}
-    *{box-sizing:border-box} body{margin:0;background:linear-gradient(160deg,#060a16,#0c1530);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif}
-    .wrap{max-width:760px;margin:0 auto;padding:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:12px}
+    :root{--bg:#0b1020;--card:#121a33;--line:#33476d;--txt:#e9efff;--muted:#9fb0d6;--brand:#7b8cff;--ok:#86efac;--warn:#fbbf24}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(160deg,#060a16,#0c1530);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif}
+    .wrap{max-width:800px;margin:0 auto;padding:16px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:12px}
     h1{margin:0 0 6px;font-size:26px}.muted{color:var(--muted);font-size:13px}
-    input,textarea,select{width:100%;background:#0a1225;color:#fff;border:1px solid #33476d;border-radius:10px;padding:10px}
-    .g{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media (max-width:700px){.g{grid-template-columns:1fr}}
-    .actions{display:flex;gap:10px;flex-wrap:wrap}.btn{border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}.main{background:var(--brand);color:#0a1020}.sub{background:#2a3f65;color:#e5ecff}
-    pre{white-space:pre-wrap;background:#0a1224;border:1px solid #344a72;border-radius:10px;padding:10px;line-height:1.6}
+    input,select{width:100%;background:#0a1225;color:#fff;border:1px solid #33476d;border-radius:10px;padding:10px}
+    .g{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media (max-width:720px){.g{grid-template-columns:1fr}}
+    .actions{display:flex;gap:10px;flex-wrap:wrap}.btn{border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
+    .main{background:var(--brand);color:#0a1020}.sub{background:#2a3f65;color:#e5ecff}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    pre{white-space:pre-wrap;background:#0a1224;border:1px solid #344a72;border-radius:10px;padding:10px;line-height:1.6;min-height:64px}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .chip{border:1px solid #3a4f79;border-radius:999px;padding:5px 10px;font-size:12px;cursor:pointer;background:#111b35;color:#c9d8ff}
+    .status{font-size:13px;margin-top:8px}.ok{color:var(--ok)}.warn{color:var(--warn)}
     .metrics{font-size:13px;line-height:1.7}
   </style>
 </head>
@@ -20,16 +27,21 @@
   <div class="card">
     <h1>QuoteFlow</h1>
     <div>60秒生成可直接发送的报价单和催款文案。</div>
-    <div class="muted">少即是多：填写信息 → 生成 → 复制发送</div>
+    <div class="muted">主路径：填写信息 → 生成文案 → 复制发送</div>
+    <div class="chips" id="sceneChips"></div>
   </div>
 
   <div class="card">
     <div class="g">
       <div><label class="muted">客户名</label><input id="client" placeholder="例如：王女士" /></div>
       <div><label class="muted">项目名</label><input id="project" placeholder="例如：小红书账号代运营" /></div>
-      <div><label class="muted">金额（元）</label><input id="amount" placeholder="例如：3000" /></div>
+      <div><label class="muted">金额（元）</label><input id="amount" inputmode="numeric" placeholder="例如：3000" /></div>
       <div><label class="muted">截止日期</label><input id="due" type="date" /></div>
+      <div><label class="muted">语气风格</label>
+        <select id="tone"><option value="professional">专业稳妥</option><option value="friendly">友好亲和</option><option value="firm">清晰强硬</option></select>
+      </div>
     </div>
+    <div class="status" id="status">请填写信息后点击“生成文案”。</div>
     <br/>
     <div class="actions">
       <button id="gen" class="btn main">生成文案</button>
@@ -55,114 +67,71 @@
       <button id="exportMetrics" class="btn sub">导出统计JSON</button>
       <button id="resetMetrics" class="btn sub">重置统计</button>
     </div>
-    <div class="muted">说明：数据仅保存在当前浏览器 localStorage，不上传服务器。</div>
+    <div class="muted">数据仅保存在当前浏览器 localStorage，不上传服务器。</div>
   </details>
 </div>
 <script>
 let Q='',S='',H='';
-const METRICS_KEY = 'quoteflow.metrics.v1';
+const METRICS_KEY='quoteflow.metrics.v1';
+const FORM_KEY='quoteflow.form.v1';
+const scenes=[
+  {label:'设计服务',project:'品牌海报设计',amount:'1200'},
+  {label:'短视频剪辑',project:'短视频剪辑包月',amount:'3000'},
+  {label:'代运营',project:'小红书账号代运营',amount:'4800'}
+];
 
 function v(id){return document.getElementById(id).value.trim()}
+function setStatus(text,cls=''){const el=document.getElementById('status');el.className='status '+cls;el.textContent=text;}
 function must(){return ['client','project','amount','due'].every(id=>v(id))}
-function uuid(){return crypto?.randomUUID ? crypto.randomUUID() : ('sid-' + Date.now() + '-' + Math.random().toString(16).slice(2));}
+function uuid(){return crypto?.randomUUID ? crypto.randomUUID() : ('sid-'+Date.now()+'-'+Math.random().toString(16).slice(2));}
 
-function getMetrics(){
-  const raw = localStorage.getItem(METRICS_KEY);
-  if(raw){
-    try { return JSON.parse(raw); } catch(e) {}
-  }
-  return {
-    session_id: uuid(),
-    created_at: Date.now(),
-    events: [],
-    counters: {
-      page_view: 0,
-      generate_click: 0,
-      generate_success: 0,
-      generate_fail: 0,
-      copy_click: 0,
-      copy_success: 0,
-      copy_fail: 0
-    }
-  };
+function getMetrics(){const raw=localStorage.getItem(METRICS_KEY);if(raw){try{return JSON.parse(raw)}catch{}}
+  return {session_id:uuid(),created_at:Date.now(),events:[],counters:{page_view:0,generate_click:0,generate_success:0,generate_fail:0,copy_click:0,copy_success:0,copy_fail:0}}}
+function saveMetrics(m){localStorage.setItem(METRICS_KEY,JSON.stringify(m))}
+function track(event,extra={}){const m=getMetrics();if(typeof m.counters[event]==='number')m.counters[event]+=1;m.events.push({ts:Date.now(),event,...extra});if(m.events.length>300)m.events=m.events.slice(-300);saveMetrics(m);renderMetrics();}
+
+function renderMetrics(){const c=getMetrics().counters;
+  const genRate=c.page_view?((c.generate_success/c.page_view)*100).toFixed(1):'0.0';
+  const copyRate=c.generate_success?((c.copy_success/c.generate_success)*100).toFixed(1):'0.0';
+  const failRate=(c.generate_success+c.generate_fail)?((c.generate_fail/(c.generate_success+c.generate_fail))*100).toFixed(1):'0.0';
+  document.getElementById('metricsBox').innerHTML=`PV: ${c.page_view}<br>生成点击: ${c.generate_click} ｜ 生成成功: ${c.generate_success} ｜ 生成失败: ${c.generate_fail}<br>复制点击: ${c.copy_click} ｜ 复制成功: ${c.copy_success} ｜ 复制失败: ${c.copy_fail}<br>生成率: ${genRate}% ｜ 复制率: ${copyRate}% ｜ 生成失败率: ${failRate}%`;
 }
 
-function saveMetrics(m){ localStorage.setItem(METRICS_KEY, JSON.stringify(m)); }
+function saveForm(){localStorage.setItem(FORM_KEY,JSON.stringify({client:v('client'),project:v('project'),amount:v('amount'),due:v('due'),tone:v('tone')}));}
+function restoreForm(){const raw=localStorage.getItem(FORM_KEY);if(!raw)return;try{const f=JSON.parse(raw);['client','project','amount','due','tone'].forEach(k=>{if(f[k])document.getElementById(k).value=f[k];});}catch{}}
 
-function track(event, extra={}){
-  const m = getMetrics();
-  if (typeof m.counters[event] === 'number') m.counters[event] += 1;
-  m.events.push({
-    ts: Date.now(),
-    event,
-    ...extra
-  });
-  if (m.events.length > 300) m.events = m.events.slice(-300);
-  saveMetrics(m);
-  renderMetrics();
-}
-
-function renderMetrics(){
-  const m = getMetrics();
-  const c = m.counters;
-  const genRate = c.page_view ? ((c.generate_success / c.page_view) * 100).toFixed(1) : '0.0';
-  const copyRate = c.generate_success ? ((c.copy_success / c.generate_success) * 100).toFixed(1) : '0.0';
-  const failRate = (c.generate_success + c.generate_fail) ? ((c.generate_fail / (c.generate_success + c.generate_fail)) * 100).toFixed(1) : '0.0';
-
-  document.getElementById('metricsBox').innerHTML = `
-PV(页面打开): ${c.page_view}<br>
-生成点击: ${c.generate_click} ｜ 生成成功: ${c.generate_success} ｜ 生成失败: ${c.generate_fail}<br>
-复制点击: ${c.copy_click} ｜ 复制成功: ${c.copy_success} ｜ 复制失败: ${c.copy_fail}<br>
-生成率: ${genRate}% ｜ 复制率: ${copyRate}% ｜ 生成失败率: ${failRate}%`;
+function buildTexts(){
+  const c=v('client'),p=v('project'),a=v('amount'),d=v('due'),tone=v('tone');
+  const head=tone==='friendly'?'Hi':'您好';
+  Q=`【报价单】\n客户：${c}\n项目：${p}\n金额：¥${a}\n交付/付款截止：${d}\n\n如确认，请回复“同意”，我将按此排期执行。`;
+  S=`${head} ${c}，关于「${p}」这单，金额 ¥${a}，约定截止是 ${d}。\n这边温馨提醒一下，如已安排付款烦请回个消息，我好同步排期。`;
+  H=`${c}，关于「${p}」项目款 ¥${a} 已超过约定时间（${d}）。\n请在今天内完成支付并回执；若仍未处理，我将暂停后续交付。谢谢配合。`;
 }
 
 function gen(){
   track('generate_click');
-  if(!must()){
-    track('generate_fail', {reason:'missing_fields'});
-    return alert('请先填完整：客户名/项目名/金额/截止日期');
-  }
-  const c=v('client'),p=v('project'),a=v('amount'),d=v('due');
-  Q=`【报价单】\n客户：${c}\n项目：${p}\n金额：¥${a}\n交付/付款截止：${d}\n\n如确认，请回复“同意”，我将按此排期执行。`;
-  S=`Hi ${c}，关于「${p}」这单，金额 ¥${a}，约定截止是 ${d}。\n这边温馨提醒下，如已安排付款烦请回个消息，我好同步排期🙏`;
-  H=`${c}，关于「${p}」项目款 ¥${a} 已超过约定时间（${d}）。\n请在今天内完成支付并回执；若仍未处理，我将暂停后续交付。谢谢配合。`;
-  document.getElementById('quote').textContent=Q;
-  document.getElementById('soft').textContent=S;
-  document.getElementById('hard').textContent=H;
-  track('generate_success');
+  saveForm();
+  if(!must()){track('generate_fail',{reason:'missing_fields'});setStatus('请先填完整：客户名 / 项目名 / 金额 / 截止日期','warn');return;}
+  const btn=document.getElementById('gen');btn.disabled=true;btn.textContent='生成中...';
+  setTimeout(()=>{
+    buildTexts();
+    document.getElementById('quote').textContent=Q;
+    document.getElementById('soft').textContent=S;
+    document.getElementById('hard').textContent=H;
+    track('generate_success');
+    setStatus('已生成，可直接复制发送。','ok');
+    btn.disabled=false;btn.textContent='生成文案';
+  },220);
 }
 
-async function copy(t, type){
-  track('copy_click', {type});
-  if(!t){
-    track('copy_fail', {type, reason:'empty'});
-    return alert('先生成内容');
-  }
-  try{
-    await navigator.clipboard.writeText(t);
-    track('copy_success', {type});
-    alert('已复制');
-  }catch(e){
-    track('copy_fail', {type, reason:'clipboard_error'});
-    alert('复制失败，请手动长按文本复制');
-  }
-}
+async function copy(t,type){track('copy_click',{type});if(!t){track('copy_fail',{type,reason:'empty'});setStatus('请先生成文案再复制。','warn');return;}
+  try{await navigator.clipboard.writeText(t);track('copy_success',{type});setStatus('已复制到剪贴板。','ok');}
+  catch{track('copy_fail',{type,reason:'clipboard_error'});setStatus('复制失败，请手动长按文本复制。','warn');}}
 
-function exportMetrics(){
-  const m = getMetrics();
-  const blob = new Blob([JSON.stringify(m, null, 2)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `quoteflow-metrics-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
+function exportMetrics(){const m=getMetrics();const blob=new Blob([JSON.stringify(m,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`quoteflow-metrics-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;a.click();URL.revokeObjectURL(a.href);}
+function resetMetrics(){localStorage.removeItem(METRICS_KEY);renderMetrics();setStatus('统计已重置。');}
 
-function resetMetrics(){
-  localStorage.removeItem(METRICS_KEY);
-  renderMetrics();
-  alert('统计已重置');
-}
+function initScenes(){const box=document.getElementById('sceneChips');scenes.forEach(s=>{const c=document.createElement('span');c.className='chip';c.textContent=s.label;c.onclick=()=>{document.getElementById('project').value=s.project;document.getElementById('amount').value=s.amount;setStatus('已填入场景模板，请补充客户名和截止日期。');saveForm();};box.appendChild(c);});}
 
 document.getElementById('gen').onclick=gen;
 document.getElementById('copyQuote').onclick=()=>copy(Q,'quote');
@@ -170,7 +139,10 @@ document.getElementById('copySoft').onclick=()=>copy(S,'soft');
 document.getElementById('copyHard').onclick=()=>copy(H,'hard');
 document.getElementById('exportMetrics').onclick=exportMetrics;
 document.getElementById('resetMetrics').onclick=resetMetrics;
+['client','project','amount','due','tone'].forEach(id=>document.getElementById(id).addEventListener('input',saveForm));
 
+restoreForm();
+initScenes();
 track('page_view');
 renderMetrics();
 </script>
